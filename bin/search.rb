@@ -87,19 +87,20 @@ def check_dir
   Dir.mkdir(CACHE_DIR) unless FileTest.directory? CACHE_DIR
 end
 
-def cache_path
+def cache_file_path
   File.join(CACHE_DIR, SBO_FILE)
 end
+
 
 def refresh_cache()
   check_dir()
 
-  @prev_mtime = if FileTest.file? cache_path
-		  t = File.mtime(cache_path)
-		  $log.info(cache_path) { 'mtime: ' + t.to_i.to_s }
+  @prev_mtime = if FileTest.file? cache_file_path
+		  t = File.mtime(cache_file_path)
+		  $log.info(cache_file_path) { 'mtime: ' + t.to_i.to_s }
 		  t
 		else
-		  $log.info(cache_path) { 'file does not exist' }
+		  $log.info(cache_file_path) { 'file does not exist' }
 		  nil
 		end
 
@@ -130,15 +131,20 @@ def refresh_cache()
     end
   end
 
-  File.utime(@mtime, @mtime, cache_path)
+  # touch the local file, with the remote files timestamp
+  $log.info(cache_file_path) { 'updating timestamp to %s' % @mtime }
+  File.utime(@mtime, @mtime, cache_file_path)
 end
 
 def read_pkgs
-  return [] unless FileTest.file? cache_path
+  return [] unless FileTest.file? cache_file_path
 
-  gz_file = Zlib::GzipReader.open(cache_path)
+  gz_file = Zlib::GzipReader.open(cache_file_path)
+  $log.debug('zlib') { "opening #{cache_file_path}" }
   pkg_blobs = gz_file.read().split("\n\n")
+  $log.debug('zlib') { "reading the chunked groups of packages" }
   pkgs = if pkg_blobs.length > 0
+	    $log.debug('zlib') { "parsing chunking into PkgData objects" }
 	    pkg_blobs.map {|blob| PkgData.parse(blob) }
 	  else
 	    []
@@ -152,9 +158,14 @@ if $0 == __FILE__
 
   if options[:refresh]
     refresh_cache()
+  elsif not FileTest.file? cache_file_path
+    $log.info('not_found') { cache_file_path }
+    abort('error: please run with the "-r" flag, to refresh the cache')
   end
   
-  @pkgs = read_pkgs()
+  if options[:desc_key] or options[:name_key]
+    @pkgs = read_pkgs()
+  end
 
   if options[:desc_key]
     @pkgs.each do |pkg|
